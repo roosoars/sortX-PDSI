@@ -44,7 +44,6 @@ public class MainUI {
     private final RadioButton modeInPlace = new RadioButton("No arquivo (in-place)");
     private final ToggleGroup modeGroup = new ToggleGroup();
 
-    // Novo: escolha do modo externo
     private final ComboBox<String> externalModeCombo = new ComboBox<>();
 
     private final TableView<Map<String, Object>> table = new TableView<>();
@@ -53,7 +52,6 @@ public class MainUI {
     private final RuleEditorPane ruleEditor;
     private final ChartsPane chartsPane;
 
-    // Problem tabs content
     private final Label suggestionLabel = new Label("Sugestão: -");
     private final ComboBox<String> problemAlgoCombo = new ComboBox<>();
     private final TextField capacityField = new TextField();
@@ -64,7 +62,6 @@ public class MainUI {
     private final PieChart weightPie = new PieChart();
     private final Button exportResultBtn = new Button("Exportar Resultado...");
 
-    // Tabs
     private Tab tabRules;
     private Tab tabCharts;
     private Tab tabProblems;
@@ -105,14 +102,12 @@ public class MainUI {
         modeInPlace.setToggleGroup(modeGroup);
         modeGroup.selectToggle(modeInMemory);
 
-        // Novo: opções do modo externo
         externalModeCombo.setItems(FXCollections.observableArrayList(
                 "Índice em Disco (zero RAM)",
                 "Runs externos (chunks)"
         ));
         externalModeCombo.getSelectionModel().selectFirst();
 
-        // Atualiza habilitação/visibilidade quando usuário troca o modo
         modeGroup.selectedToggleProperty().addListener((obs, o, n) -> updateExternalModeControl());
 
         Region spacer = new Region();
@@ -170,7 +165,6 @@ public class MainUI {
         v.setPadding(new Insets(10));
         suggestionLabel.setWrapText(true);
 
-        // Algoritmos disponíveis
         problemAlgoCombo.setItems(FXCollections.observableArrayList(
                 "Programação Dinâmica",
                 "Divisão e Conquista",
@@ -194,12 +188,10 @@ public class MainUI {
         VBox v = new VBox(10);
         v.setPadding(new Insets(10));
 
-        // Tabela de itens selecionados (resultado)
         selectedItemsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_ALL_COLUMNS);
 
         exportResultBtn.setOnAction(e -> onExportResult());
 
-        // Gráficos finais (pizza por valor e por peso)
         valuePie.setTitle("Participação por valor");
         weightPie.setTitle("Participação por peso");
 
@@ -235,13 +227,11 @@ public class MainUI {
 
     private void updateTabsForProblemType() {
         boolean isDP = currentProblem == ProblemType.DP;
-        // Enable/disable tabs according to problem type
         tabRules.setDisable(isDP);
         tabCharts.setDisable(isDP);
         tabProblems.setDisable(!isDP);
         tabResolution.setDisable(!isDP);
 
-        // Controles de memória só fazem sentido para Ordenação
         setMemoryControlsEnabled(!isDP);
         updateExternalModeControl();
     }
@@ -307,7 +297,6 @@ public class MainUI {
             return;
         }
 
-        // ===== Modo Problema (DP) =====
         if (currentProblem == ProblemType.DP) {
             String algoChoice = Optional.ofNullable(problemAlgoCombo.getValue()).orElse("Programação Dinâmica");
             int capacity;
@@ -345,7 +334,6 @@ public class MainUI {
             return;
         }
 
-        // ===== Modo Ordenação =====
         if (ruleSet.isEmpty()) {
             showAlert(Alert.AlertType.WARNING, "Sem regras", "Adicione ao menos uma regra de ordenação.");
             return;
@@ -368,7 +356,6 @@ public class MainUI {
                         sortRegistry,
                         extMode
                 );
-                // Reload para refletir alterações
                 DataParser parser = parserRegistry.findFor(currentFile.getName());
                 currentData = parser.parse(currentFile);
                 buildTableColumns(currentData.immutableHeaders());
@@ -412,7 +399,6 @@ public class MainUI {
         a.showAndWait();
     }
 
-    // ===== Knapsack helpers =====
     private static class Item {
         final String name; final int weight; final int value;
         Item(String name, int weight, int value) { this.name = name; this.weight = weight; this.value = value; }
@@ -508,7 +494,6 @@ public class MainUI {
     }
 
     private Result solveKnapsackGreedy(List<Item> items, int capacity) {
-        // Heurística por razão valor/peso (0/1, não garante ótimo)
         List<Item> sorted = new ArrayList<>(items);
         sorted.sort((a, b) -> Double.compare((double)b.value / Math.max(1,b.weight), (double)a.value / Math.max(1,a.weight)));
         List<Item> selected = new ArrayList<>();

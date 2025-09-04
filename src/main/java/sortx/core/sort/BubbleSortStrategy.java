@@ -22,7 +22,7 @@ public class BubbleSortStrategy<T> implements SortStrategy<T> {
                     swapped = true;
                 }
             }
-            n--; // last element is in place
+            n--;
         } while (swapped);
     }
 }

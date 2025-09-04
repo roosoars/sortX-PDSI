@@ -32,7 +32,6 @@ public class ComparatorFactory {
             }
         }
 
-        // Por padrão, nulls vão para o fim
         Comparator<Object> withNulls = Comparator.nullsLast(base);
         Comparator<DataRecord> comp = Comparator.comparing(dr -> dr.asMap().get(rule.getColumn()), withNulls);
         if (rule.getOrder() == SortOrder.DESC) {
