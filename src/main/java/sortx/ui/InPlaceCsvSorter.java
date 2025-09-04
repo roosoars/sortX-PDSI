@@ -16,37 +16,21 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
 
-/**
- * InPlaceCsvSorter — Ordenação no modo "in-place" (arquivo) com dois motores externos:
- *
- *  1) INDEX  (zero RAM): indexa (offset,length) de cada linha; ordena o ARQUIVO de índice no disco;
- *     regrava o CSV final na ordem do índice. Sem carregar o CSV na memória principal.
- *
- *  2) RUNS   (chunks): external merge sort clássico; cria runs temporários ordenando blocos em RAM
- *     com a estratégia escolhida e faz merge N-vias. Evita carregar o arquivo inteiro.
- *
- * Escolha o modo via MainUI (combo) ou pela sobrecarga com ExternalMode.
- */
 public class InPlaceCsvSorter {
 
     public enum ExternalMode { INDEX, RUNS }
 
-    // ===== Configs de I/O =====
     private static final int MAX_LINE_BYTES = Integer.getInteger("sortx.maxLineBytes", 1_048_576); // 1MiB por linha (INDEX)
     private static final int INDEX_IO_BUFFER = Integer.getInteger("sortx.indexIoBuffer", 64 * 1024); // 64KiB
     private static final java.nio.charset.Charset CS = StandardCharsets.UTF_8;
     private static final int INDEX_REC_SIZE = 12; // [offset(long)=8][length(int)=4]
 
-    // Delimitador CSV (mantém compat com parser principal)
     private static final char CSV_DELIM = CSVFormat.DEFAULT.getDelimiter();
 
-    // Para o modo RUNS (chunks)
     private static final int MAX_ROWS_IN_MEMORY =
             Integer.getInteger("sortx.maxRowsInMemory", 50_000);
 
-    // ===== API =====
 
-    // Compat: usa system property "sortx.externalMode" (INDEX padrão)
     public static void sortFile(File file,
                                 RuleSet rules,
                                 String algorithmName,
@@ -67,7 +51,7 @@ public class InPlaceCsvSorter {
         Objects.requireNonNull(mode, "mode");
 
         if (mode == ExternalMode.INDEX) {
-            // ===== Modo 1: índice em disco (zero RAM) =====
+            // Modo 1 índice em disco (zero RAM)
             IndexInfo index = buildDiskIndex(file);
             Comparator<IndexEntry> cmp = buildDiskRecordComparator(file, index.headers, rules, locale);
             switch (algorithmName.toLowerCase(Locale.ROOT)) {
@@ -82,21 +66,19 @@ public class InPlaceCsvSorter {
             return;
         }
 
-        // ===== Modo 2: external merge por runs (chunks) =====
+        //  Modo 2 external merge por runs (chunks)
         externalMergeByRuns(file, rules, algorithmName, locale, sortRegistry);
     }
 
-    // ===================================================================================
-    // MODO 1: INDEX (zero RAM) — lê/ordena índice no disco e regrava CSV pela ordem nova
-    // ===================================================================================
+    // MODO 1 INDEX (zero RAM) lê/ordena índice no disco e regrava CSV pela ordem nova
 
     private static class IndexInfo {
         final File idxFile;
-        final long headerStart;     // geralmente 0
-        final int headerLength;     // bytes do header (sem terminador)
-        final String newline;       // "\n" ou "\r\n"
+        final long headerStart;
+        final int headerLength;
+        final String newline;
         final String[] headers;
-        final long count;           // nº de linhas de dados (sem header)
+        final long count;
         IndexInfo(File idxFile, long headerStart, int headerLength, String newline, String[] headers, long count) {
             this.idxFile = idxFile;
             this.headerStart = headerStart;
@@ -108,8 +90,8 @@ public class InPlaceCsvSorter {
     }
 
     private static class IndexEntry {
-        long offset; // início da linha (sem terminador)
-        int length;  // tamanho da linha em bytes (sem terminador)
+        long offset;
+        int length;
         IndexEntry() {}
         IndexEntry(long o, int l) { offset = o; length = l; }
     }
@@ -154,7 +136,6 @@ public class InPlaceCsvSorter {
                 pos++;
             }
 
-            // Útima linha sem \n
             if (pos > lineStart) {
                 int len = (int) (pos - lineStart);
                 if (firstLine) {
@@ -282,7 +263,6 @@ public class InPlaceCsvSorter {
         writeIndex(idx, j, a);
     }
 
-    // === Helpers para versões que mantêm um único RAF aberto (performático para O(n^2)) ===
     private static IndexEntry readIndexAt(RandomAccessFile raf, long i) throws IOException {
         raf.seek(i * INDEX_REC_SIZE);
         IndexEntry e = new IndexEntry();
@@ -316,7 +296,6 @@ public class InPlaceCsvSorter {
         raf.writeInt(il);
     }
 
-    // QuickSort no disco (índice)
     private static void diskQuickSort(File idx, long lo, long hi, Comparator<IndexEntry> comp) throws IOException {
         if (lo >= hi) return;
         long i = lo, j = hi;
@@ -335,7 +314,6 @@ public class InPlaceCsvSorter {
         return comp.compare(e, pivot);
     }
 
-    // MergeSort bottom-up no disco (índice)
     private static void diskMergeSort(File idx, Comparator<IndexEntry> comp) throws IOException {
         long n = indexCount(idx);
         if (n <= 1) return;
@@ -388,7 +366,6 @@ public class InPlaceCsvSorter {
         }
     }
 
-    // BubbleSort no disco (índice) — usa um RAF só para reduzir overhead
     private static void diskBubbleSort(File idx, long n, Comparator<IndexEntry> comp) throws IOException {
         boolean swapped;
         long end = n;
@@ -408,7 +385,6 @@ public class InPlaceCsvSorter {
         }
     }
 
-    // SelectionSort no disco (índice)
     private static void diskSelectionSort(File idx, long n, Comparator<IndexEntry> comp) throws IOException {
         try (RandomAccessFile raf = new RandomAccessFile(idx, "rw")) {
             for (long i = 0; i < n - 1; i++) {
@@ -473,9 +449,7 @@ public class InPlaceCsvSorter {
         }
     }
 
-    // ===================================================================================
-    // MODO 2: RUNS (chunks) — external merge sort genérico por runs (usa pouca RAM)
-    // ===================================================================================
+    // MODO 2 RUNS (chunks) external merge sort genérico por runs (usa pouca RAM)
 
     private static void externalMergeByRuns(File file,
                                             RuleSet rules,
@@ -490,7 +464,6 @@ public class InPlaceCsvSorter {
 
         List<File> runs = new ArrayList<>();
 
-        // Phase 1: criar runs (buffers em RAM de no máx. MAX_ROWS_IN_MEMORY)
         try (FileReader reader = new FileReader(file, CS);
              CSVParser parser = CSVFormat.DEFAULT
                      .builder()
@@ -517,26 +490,21 @@ public class InPlaceCsvSorter {
             }
         }
 
-        // Dados vazios: só preserva header
         if (runs.isEmpty()) {
             writeBackReplacing(file, headers, Collections.emptyList());
             return;
         }
 
-        // Um único run: substitui direto
         if (runs.size() == 1) {
             replaceFileKeepingName(file, runs.get(0));
             try { runs.get(0).delete(); } catch (Exception ignored) {}
             return;
         }
 
-        // Phase 2: merge de N vias
         File merged = mergeRuns(headers, runs, comparator);
 
-        // Substitui original
         replaceFileKeepingName(file, merged);
 
-        // Limpeza
         try { merged.delete(); } catch (Exception ignored) {}
         for (File run : runs) { try { run.delete(); } catch (Exception ignored) { } }
     }
@@ -559,8 +527,6 @@ public class InPlaceCsvSorter {
                                        List<DataRecord> rows,
                                        Comparator<DataRecord> comparator,
                                        SortStrategy<Object> strategy) throws IOException {
-        // Ordena o buffer usando a estratégia escolhida
-        //noinspection unchecked,rawtypes
         strategy.sort((List)(rows), (Comparator)comparator);
 
         File runFile = File.createTempFile("sortx_run_", ".csv");
